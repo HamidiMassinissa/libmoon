@@ -6,8 +6,15 @@ from scipy.optimize import minimize
 from scipy.linalg import solve_triangular
 from scipy.spatial.distance import cdist
 
-from libmoon.solver.mobo.surrogate_models.base import SurrogateModel
- 
+from .base import SurrogateModel
+import torch
+device = 'cpu'
+
+def safe_divide(x1, x2):
+    '''
+    Divide x1 / x2, return 0 where x2 == 0
+    '''
+    return np.divide(x1, x2, out=np.zeros(np.broadcast(x1, x2).shape), where=(x2 != 0))
 
 
 class GaussianProcess(SurrogateModel):
@@ -20,9 +27,9 @@ class GaussianProcess(SurrogateModel):
     '''
     Gaussian process
     '''
-    def __init__(self, n_var, n_obj, nu=5, **kwargs):
-        super().__init__(n_var, n_obj)
-        
+    def __init__(self, n_obj, n_var, **kwargs):
+        super().__init__(n_obj, n_var)
+        nu = 5
         self.nu = nu
         self.gps = []
 
@@ -55,7 +62,7 @@ class GaussianProcess(SurrogateModel):
         for i, gp in enumerate(self.gps):
             gp.fit(X, Y[:, i])
         
-    def evaluate(self, X, cal_std: bool = True, cal_grad: bool=False, calc_hessian=False):
+    def evaluate(self, X, calc_std=False, calc_gradient=False):
         F, dF, hF = [], [], [] # mean
         S, dS, hS = [], [], [] # std
 
@@ -67,7 +74,7 @@ class GaussianProcess(SurrogateModel):
             
             F.append(y_mean) # y_mean: shape (N,)
 
-            if cal_std:
+            if calc_std:
                 
                 L_inv = solve_triangular(gp.L_.T,
                                                 np.eye(gp.L_.shape[0]))
@@ -85,7 +92,7 @@ class GaussianProcess(SurrogateModel):
 
                 S.append(y_std) # y_std: shape (N,)
 
-            if not (cal_grad or calc_hessian): continue
+            if not (calc_gradient): continue
 
             ell = np.exp(gp.kernel_.theta[1:-1]) # ell: shape (n_var,)
             sf2 = np.exp(gp.kernel_.theta[0]) # sf2: shape (1,)
@@ -95,7 +102,7 @@ class GaussianProcess(SurrogateModel):
             dd_D = d * ell ** 2 # denominator
             dd = safe_divide(dd_N, dd_D) # dd: shape (N, N_train, n_var)
 
-            if cal_grad or calc_hessian:
+            if calc_gradient:
                 if self.nu == 1:
                     dK = -sf2 * np.exp(-d) * dd
 
@@ -110,12 +117,12 @@ class GaussianProcess(SurrogateModel):
 
                 dK_T = dK.transpose(0, 2, 1) # dK: shape (N, N_train, n_var), dK_T: shape (N, n_var, N_train)
                 
-            if cal_grad:
+            if calc_gradient:
                 dy_mean = dK_T @ gp.alpha_ # gp.alpha_: shape (N_train,)
                 dF.append(dy_mean) # dy_mean: shape (N, n_var)
 
                 # TODO: check
-                if cal_std:
+                if calc_std:
                     K = np.expand_dims(K, 1) # K: shape (N, 1, N_train)
                     K_Ki = K @ K_inv # gp._K_inv: shape (N_train, N_train), K_Ki: shape (N, 1, N_train)
                     dK_Ki = dK_T @ K_inv # dK_Ki: shape (N, n_var, N_train)
@@ -129,55 +136,17 @@ class GaussianProcess(SurrogateModel):
                     else:
                         dy_std=np.zeros(dy_var.shape)
                     dS.append(dy_std)
-
-            if calc_hessian:
-                d = np.expand_dims(d, 3) # d: shape (N, N_train, 1, 1)
-                dd = np.expand_dims(dd, 2) # dd: shape (N, N_train, 1, n_var)
-                hd_N = d * np.expand_dims(np.eye(len(ell)), (0, 1)) - np.expand_dims(X_ - X_train_, 3) * dd # numerator
-                hd_D = d ** 2 * np.expand_dims(ell ** 2, (0, 1, 3)) # denominator
-                hd = safe_divide(hd_N, hd_D) # hd: shape (N, N_train, n_var, n_var)
-
-                if self.nu == 1:
-                    hK = -sf2 * np.exp(-d) * (hd - dd ** 2)
-
-                elif self.nu == 3:
-                    hK = -3 * sf2 * np.exp(-np.sqrt(3) * d) * (d * hd + (1 - np.sqrt(3) * d) * dd ** 2)
-
-                elif self.nu == 5:
-                    hK = -5. / 3 * sf2 * np.exp(-np.sqrt(5) * d) * (-5 * d ** 2 * dd ** 2 + (1 + np.sqrt(5) * d) * (dd ** 2 + d * hd))
-
-                else: # RBF
-                    hK = -sf2 * np.exp(-0.5 * d ** 2) * ((1 - d ** 2) * dd ** 2 + d * hd)
-
-                hK_T = hK.transpose(0, 2, 3, 1) # hK: shape (N, N_train, n_var, n_var), hK_T: shape (N, n_var, n_var, N_train)
-
-                hy_mean = hK_T @ gp.alpha_ # hy_mean: shape (N, n_var, n_var)
-                hF.append(hy_mean)
-
-                # TODO: check
-                if cal_std:
-                    K = np.expand_dims(K, 2) # K: shape (N, 1, 1, N_train)
-                    dK = np.expand_dims(dK_T, 2) # dK: shape (N, n_var, 1, N_train)
-                    dK_Ki = np.expand_dims(dK_Ki, 2) # dK_Ki: shape (N, n_var, 1, N_train)
-                    hK_Ki = hK_T @ K_inv # hK_Ki: shape (N, n_var, n_var, N_train)
-
-                    hy_var = -np.sum(hK_Ki * K + 2 * dK_Ki * dK + K_Ki * hK_T, axis=3) # hy_var: shape (N, n_var, n_var)
-                    hy_std = 0.5 * safe_divide(hy_var * y_std - dy_var * dy_std, y_var) # hy_std: shape (N, n_var, n_var)
-                    hS.append(hy_std)
-
-        F = np.stack(F, axis=1)
-        dF = np.stack(dF, axis=1) if cal_grad else None
-        hF = np.stack(hF, axis=1) if calc_hessian else None
+ 
+        F = torch.from_numpy(np.stack(F, axis=1)).to(device) 
+        if not calc_std:
+            return F 
         
-        S = np.stack(S, axis=1) if cal_std else None
-        dS = np.stack(dS, axis=1) if cal_std and cal_grad else None
-        hS = np.stack(hS, axis=1) if cal_std and calc_hessian else None
-
-        out = {'F': F, 'dF': dF, 'hF': hF, 'S': S, 'dS': dS, 'hS': hS}
-        return out
-
-def safe_divide(x1, x2):
-    '''
-    Divide x1 / x2, return 0 where x2 == 0
-    '''
-    return np.divide(x1, x2, out=np.zeros(np.broadcast(x1, x2).shape), where=(x2 != 0))
+        S = torch.from_numpy(np.stack(S, axis=1)).to(device) 
+        if not calc_gradient: 
+            return F, S 
+        
+        dF = torch.from_numpy(np.stack(dF, axis=1)).to(device) 
+        dS = torch.from_numpy(np.stack(dS, axis=1)).to(device) 
+        return F, S, dF, dS
+        
+        

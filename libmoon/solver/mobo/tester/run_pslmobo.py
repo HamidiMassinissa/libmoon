@@ -10,7 +10,7 @@ import time
 from libmoon.solver.mobo.methods.pslmobo_solver import PSLMOBOSolver
 import matplotlib.pyplot as plt
 torch.set_default_dtype(torch.float64)
-from libmoon.problem.synthetic.zdt import ZDT1
+from mobo.test_functions import ZDT1
 import argparse
 from libmoon.util import random_everything, save_pickle
 from libmoon.util.problems import get_problem

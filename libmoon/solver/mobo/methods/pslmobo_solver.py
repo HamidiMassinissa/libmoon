@@ -1,26 +1,39 @@
 """
-    [1] Xi Lin, Zhiyuan Yang, Xiaoyuan Zhang, Qingfu Zhang. Pareto Set Learning for
+Reference:
+    Xi Lin, Zhiyuan Yang, Xiaoyuan Zhang, Qingfu Zhang. Pareto Set Learning for
     Expensive Multiobjective Optimization. Advances in Neural Information Processing
     Systems (NeurIPS) , 2022.
+    
 """
+
 import torch
+from torch import Tensor
 from botorch.utils.sampling import sample_simplex
 from botorch.utils.multi_objective.hypervolume import Hypervolume
-import math
-from .base_psl_model import ParetoSetModel
-torch.set_default_dtype(torch.float64)
-from libmoon.solver.mobo.methods.base_solver_pslmobo import PSLMOBO
 
-class PSLMOBOSolver(PSLMOBO):
-    def __init__(self, problem, x_init, MAX_FE, BATCH_SIZE):
-        super().__init__(problem, x_init, MAX_FE, BATCH_SIZE)
+import os
+import os.path
+import sys
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from methods.BPSModel import BayesianPSModel as ParetoSetModel
+from methods.base_solver_BPSL import BayesianPSL
+
+class PSLMOBOSolver(BayesianPSL):
+    def __init__(self, problem, MAX_FE: int, BATCH_SIZE: int, x_init: Tensor, y_init: Tensor):
+        super().__init__(problem, MAX_FE, BATCH_SIZE, x_init, y_init)
         self.solver_name = 'pslmobo'
-        self.coef_lcb = 0.1 # coefficient of LCB
+        # Parameter Setting
+        self.n_steps = 1000 # number of learning steps
+        self.n_pref_update = 10 # number of sampled preferences per step
+        self.coef_lcb = 0.5 # coefficient of LCB
+        self.n_candidate = 1000  # number of sampled candidates on the approxiamte PF
+        self.learning_rate = 1e-3
 
     def _train_psl(self):
-        self.psmodel = ParetoSetModel(self.n_var, self.n_obj)
+        self.psmodel = ParetoSetModel(self.n_obj, self.n_dim)
         # optimizer
-        optimizer = torch.optim.Adam(self.psmodel.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.psmodel.parameters(), lr=self.learning_rate)
         # t_step Pareto Set Learning with Gaussian Process
         for t_step in range(self.n_steps):
             self.psmodel.train()
@@ -29,19 +42,15 @@ class PSLMOBOSolver(PSLMOBO):
             pref_vec = sample_simplex(d=self.n_obj, n=self.n_pref_update-self.n_obj).to(torch.float64)
             pref_vec = torch.cat((pref_vec, torch.eye(self.n_obj)),dim=0)
             pref_vec = torch.clamp(pref_vec, min=1.e-6) 
-            
-             
+  
             # get the current coressponding solutions
             x = self.psmodel(pref_vec)
-            # TODO, train GPs using Gpytorch
-            out = self.gps.evaluate(x.detach().cpu().numpy(), cal_std=True, cal_grad=True) 
-            mean, std, mean_grad, std_grad = out['F'], out['S'], out['dF'], out['dS']
-            
-            
+            mean, std, mean_grad, std_grad = self.GPModelList.evaluate(x, calc_std=True, calc_gradient=True) 
+
             # calculate the value/grad of tch decomposition with LCB
-            value = torch.from_numpy(mean - self.coef_lcb * std)    # n_pref_update *  n_obj  
+            value = mean - self.coef_lcb * std    # n_pref_update *  n_obj  
             # n_pref_update *  n_obj * n_var   
-            value_grad = torch.from_numpy(mean_grad - self.coef_lcb * std_grad)
+            value_grad = mean_grad - self.coef_lcb * std_grad
             tch_idx = torch.argmax((pref_vec) * (value - self.z), axis = 1)
             tch_idx_mat = [torch.arange(len(tch_idx)),tch_idx]
             # n_pref_update *  n_var  
@@ -52,7 +61,7 @@ class PSLMOBOSolver(PSLMOBO):
             self.psmodel(pref_vec).backward(tch_grad)
             optimizer.step()  
             
-    def _batch_selection(self, batch_size):
+    def _batch_selection(self, batch_size: int)->Tensor:
         # sample n_candidate preferences default:1000
         self.psmodel.eval()  # Sets the module in evaluation mode.
         pref = sample_simplex(d=self.n_obj, n=self.n_candidate).to(torch.float64)
@@ -60,14 +69,12 @@ class PSLMOBOSolver(PSLMOBO):
         # generate correponding solutions, get the predicted mean/std
         with torch.no_grad():
             candidate_x = self.psmodel(pref).to(torch.float64)
-            # TODO, train GPs using Gpytorch
-            out = self.gps.evaluate(candidate_x.detach().cpu().numpy(), cal_std=True, cal_grad=False)
-            candidate_mean, candidata_std = torch.from_numpy(out['F']), torch.from_numpy(out['S'])
-          
+            candidate_mean, candidata_std = self.GPModelList.evaluate(candidate_x, calc_std=True, calc_gradient=False) 
+  
         Y_candidate = candidate_mean - self.coef_lcb * candidata_std 
         # hv
         ref_point = torch.max(torch.cat((self.train_y_nds,Y_candidate),dim=0),axis=0).values.data
-        hv = Hypervolume(ref_point=-ref_point) # botorch, maximization
+        hv = Hypervolume(ref_point=-ref_point) # minimization problem
         # greedy batch selection 
         best_subset_list = []
         Y_p = self.train_y_nds.clone()
@@ -76,7 +83,7 @@ class PSLMOBOSolver(PSLMOBO):
             best_subset = None
             for k in range(self.n_candidate):
                 Y_comb = torch.cat((Y_p,Y_candidate[k:k+1,:]),dim=0)
-                hv_value_subset = hv.compute(-Y_comb) # botorch, maximization
+                hv_value_subset = hv.compute(-Y_comb) # minimization problem
                 if hv_value_subset > best_hv_value:
                     best_hv_value = hv_value_subset
                     best_subset = k
@@ -85,8 +92,40 @@ class PSLMOBOSolver(PSLMOBO):
             best_subset_list.append(best_subset)  
        
         # evaluate the selected n_sample solutions
-        X_new = candidate_x[best_subset_list]
-        return X_new 
+        new_x = candidate_x[best_subset_list]
+        return new_x
+    
+if __name__ == '__main__':
+    import time
+    from utils.lhs import lhs
+    import matplotlib.pyplot as plt
+    from test_functions import ZDT1
+    
+    # minimization
+    problem = ZDT1(n_obj=2,n_dim=8)
+    n_init = 11*problem.n_dim-1
+    batch_size = 5
+    maxFE = 200
+    ts = time.time()
+ 
+    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init))
+    y_init = problem.evaluate(x_init)
+    solver = PSLMOBOSolver(problem, maxFE, batch_size, x_init, y_init)
+    res = solver.solve()
+    elapsed = time.time() - ts
+    res['elapsed'] = elapsed
+
+    fig = plt.figure()
+    plt.scatter(res['y'][res['FrontNo'][0],0], res['y'][res['FrontNo'][0],1], label='Solutions')
+    if hasattr(problem, '_get_pf'):
+        plt.plot(problem._get_pf()[:,0], problem._get_pf()[:,1], label='PF')
+
+    plt.legend(fontsize=16)
+    plt.xlabel('$f_1$', fontsize=18)
+    plt.ylabel('$f_2$', fontsize=18)
+    plt.show()
+  
+ 
     
     
    

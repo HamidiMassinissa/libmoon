@@ -10,34 +10,36 @@ Computation, 28(2): 432-444, 2024.
 """
 
 import torch
-import torch.nn as nn
 from torch import Tensor 
+from typing import Tuple 
+
 from botorch.utils.sampling import sample_simplex
-from botorch.utils.multi_objective.hypervolume import Hypervolume
-import math
-from .base_psl_model import ParetoSetModel
-from libmoon.solver.mobo.utils import lhs
-from botorch.utils.transforms import unnormalize, normalize
-from tqdm import tqdm
-import numpy as np
-from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
-from libmoon.solver.mobo.surrogate_models import GaussianProcess
-torch.set_default_dtype(torch.float64)
-from libmoon.solver.mobo.methods.base_solver_pslmobo import PSLMOBO
 from botorch.utils.probability.utils import (
-    log_ndtr as log_Phi,
-    log_phi, # Logarithm of standard normal pdf
-    log_prob_normal_in,
     ndtr as Phi, # Standard normal CDF
     phi, # Standard normal PDF
 )
-class PSLDirHVEISolver(PSLMOBO):
-    def __init__(self, problem, x_init, MAX_FE, BATCH_SIZE):
-        super().__init__(problem, x_init, MAX_FE, BATCH_SIZE)
+
+import os
+import os.path
+import sys
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from methods.BPSModel import BayesianPSModel as ParetoSetModel
+from methods.base_solver_BPSL import BayesianPSL
+
+class PSLDirHVEISolver(BayesianPSL):
+    def __init__(self, problem, MAX_FE: int, BATCH_SIZE: int, x_init: Tensor, y_init: Tensor):
+        super().__init__(problem, MAX_FE, BATCH_SIZE, x_init, y_init)
         self.solver_name = 'psldirhvei'
+        # Parameter Setting
+        self.n_steps = 1000 # number of learning steps
+        self.n_pref_update = 10 # number of sampled preferences per step
+        self.coef_lcb = 0.5 # coefficient of LCB
+        self.n_candidate = 1000  # number of sampled candidates on the approxiamte PF
+        self.learning_rate = 1e-3
 
 
-    def _get_xis(self, ref_vecs):
+    def _get_xis(self, ref_vecs: Tensor)->Tuple[Tensor,Tensor]:
         # ref_vecs is generated via simplex-lattice design
         # temp = 1.1 * ref_vecs - self.z
         dir_vecs = ref_vecs / torch.norm(ref_vecs, dim=1, keepdim=True)
@@ -55,9 +57,9 @@ class PSLDirHVEISolver(PSLMOBO):
         return xis, dir_vecs
 	
     def _train_psl(self):
-        self.psmodel = ParetoSetModel(self.n_var, self.n_obj)
+        self.psmodel = ParetoSetModel(self.n_obj, self.n_dim)
         # optimizer
-        optimizer = torch.optim.Adam(self.psmodel.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.psmodel.parameters(), lr=self.learning_rate)
         # t_step Pareto Set Learning with Gaussian Process
         for t_step in range(self.n_steps):
             self.psmodel.train()
@@ -70,16 +72,14 @@ class PSLDirHVEISolver(PSLMOBO):
             xis, dir_vecs = self._get_xis(pref_vec) 
             # get the current coressponding solutions
             x = self.psmodel(pref_vec)
-            # TODO, train GPs using Gpytorch
-            out = self.gps.evaluate(x.detach().cpu().numpy(), cal_std=True, cal_grad=True) 
-            mean, std, mean_grad, std_grad = torch.from_numpy(out['F']), torch.from_numpy(out['S']), torch.from_numpy(out['dF']), torch.from_numpy(out['dS'])
+            mean, std, mean_grad, std_grad = self.GPModelList.evaluate(x, calc_std=True, calc_gradient=True) 
             
             xi_minus_u = xis - mean  # N*M
             tau = xi_minus_u / std  # N*M
             alpha_i = xi_minus_u * Phi(tau) + std * phi(tau)  # N*M
    
-            alpha_mean_grad = (-Phi(tau)*alpha_i).unsqueeze(2).repeat(1,1,self.n_var) * mean_grad
-            alpha_std_grad = (phi(tau)*alpha_i).unsqueeze(2).repeat(1,1,self.n_var) * std_grad
+            alpha_mean_grad = (-Phi(tau)*alpha_i).unsqueeze(2).repeat(1,1,self.n_dim) * mean_grad
+            alpha_std_grad = (phi(tau)*alpha_i).unsqueeze(2).repeat(1,1,self.n_dim) * std_grad
             dirhvei_grad = -torch.sum( alpha_mean_grad + alpha_std_grad, dim=1)
              
             # gradient-based pareto set model update 
@@ -87,7 +87,7 @@ class PSLDirHVEISolver(PSLMOBO):
             self.psmodel(pref_vec).backward(dirhvei_grad)
             optimizer.step()  
             
-    def _batch_selection(self, batch_size):
+    def _batch_selection(self, batch_size: int)->Tensor:
         # sample n_candidate preferences default:1000
         self.psmodel.eval()  # Sets the module in evaluation mode.
         pref = sample_simplex(d=self.n_obj, n=self.n_candidate).to(torch.float64)
@@ -96,9 +96,7 @@ class PSLDirHVEISolver(PSLMOBO):
         # generate correponding solutions, get the predicted mean/std
         with torch.no_grad():
             candidate_x = self.psmodel(pref).to(torch.float64) 
-            # TODO, train GPs using Gpytorch
-            out = self.gps.evaluate(candidate_x.detach().cpu().numpy(), cal_std=True, cal_grad=False)
-            candidate_mean, candidata_std = torch.from_numpy(out['F']), torch.from_numpy(out['S'])
+            candidate_mean, candidata_std = self.GPModelList.evaluate(candidate_x, calc_std=True, calc_gradient=False) 
         xis, dir_vecs = self._get_xis(pref)  
         EIDs = torch.zeros(self.n_candidate,self.n_candidate)
         for i in range(self.n_candidate):
@@ -118,10 +116,40 @@ class PSLDirHVEISolver(PSLMOBO):
             # Update temp: [EI_D(x|\lambda) - beta]_+
             temp = EIDs - beta[None, :].repeat(self.n_candidate, 1)
             temp[temp < 0] = 0
-      
+  
         # evaluate the selected n_sample solutions
-        X_new = candidate_x[Qb]
-        return X_new  
+        new_x = candidate_x[Qb]
+        return new_x
+    
+if __name__ == '__main__':
+    import time
+    from utils.lhs import lhs
+    import matplotlib.pyplot as plt
+    from test_functions import ZDT1
+    
+    # minimization
+    problem = ZDT1(n_obj=2,n_dim=8)
+    n_init = 11*problem.n_dim-1
+    batch_size = 5
+    maxFE = 200
+    ts = time.time()
+ 
+    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init))
+    y_init = problem.evaluate(x_init)
+    solver = PSLDirHVEISolver(problem, maxFE, batch_size, x_init, y_init)
+    res = solver.solve()
+    elapsed = time.time() - ts
+    res['elapsed'] = elapsed
+
+    fig = plt.figure()
+    plt.scatter(res['y'][res['FrontNo'][0],0], res['y'][res['FrontNo'][0],1], label='Solutions')
+    if hasattr(problem, '_get_pf'):
+        plt.plot(problem._get_pf()[:,0], problem._get_pf()[:,1], label='PF')
+
+    plt.legend(fontsize=16)
+    plt.xlabel('$f_1$', fontsize=18)
+    plt.ylabel('$f_2$', fontsize=18)
+    plt.show()
     
      
     

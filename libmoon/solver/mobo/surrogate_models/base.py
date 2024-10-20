@@ -8,7 +8,7 @@ class SurrogateModel(ABC):
     '''
     Base class of surrogate model
     '''
-    def __init__(self, n_var, n_obj):
+    def __init__(self, n_obj, n_var):
         self.n_var = n_var
         self.n_obj = n_obj
 
