@@ -16,6 +16,10 @@ from typing import List, Union
 import torch
 from botorch.test_functions.base import MultiObjectiveTestProblem
 from torch import Tensor
+tkwargs = {
+    "dtype": torch.double,
+    "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+}
  
 class ZDT():
     def __init__(
@@ -30,9 +34,9 @@ class ZDT():
         self.n_obj = n_obj
         self.n_dim = n_dim
     
-        self._lower_x = torch.zeros((1,self.n_dim)).float() 
-        self._upper_x = torch.ones((1,self.n_dim)).float() 
-        self.ref_point = torch.ones(self.n_obj).float()*11
+        self._lower_x = torch.zeros((1,self.n_dim)).to(**tkwargs) 
+        self._upper_x = torch.ones((1,self.n_dim)).to(**tkwargs)
+        self.ref_point = 11*torch.ones(self.n_obj).to(**tkwargs)
 
 
 class ZDT1(ZDT):

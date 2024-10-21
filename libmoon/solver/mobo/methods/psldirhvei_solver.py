@@ -58,6 +58,7 @@ class PSLDirHVEISolver(BayesianPSL):
 	
     def _train_psl(self):
         self.psmodel = ParetoSetModel(self.n_obj, self.n_dim)
+        self.psmodel.to(**tkwargs)
         # optimizer
         optimizer = torch.optim.Adam(self.psmodel.parameters(), lr=self.learning_rate)
         # t_step Pareto Set Learning with Gaussian Process
@@ -65,8 +66,8 @@ class PSLDirHVEISolver(BayesianPSL):
             self.psmodel.train()
             
             # sample n_pref_update preferences L1=1
-            pref_vec = sample_simplex(d=self.n_obj, n=self.n_pref_update-self.n_obj).to(torch.float64)
-            pref_vec = torch.cat((pref_vec, torch.eye(self.n_obj)),dim=0)
+            pref_vec = sample_simplex(d=self.n_obj, n=self.n_pref_update-self.n_obj).to(**tkwargs)
+            pref_vec = torch.cat((pref_vec, torch.eye(self.n_obj).to(**tkwargs)),dim=0)
             pref_vec = torch.clamp(pref_vec, min=1.e-6) 
             
             xis, dir_vecs = self._get_xis(pref_vec) 
@@ -90,15 +91,15 @@ class PSLDirHVEISolver(BayesianPSL):
     def _batch_selection(self, batch_size: int)->Tensor:
         # sample n_candidate preferences default:1000
         self.psmodel.eval()  # Sets the module in evaluation mode.
-        pref = sample_simplex(d=self.n_obj, n=self.n_candidate).to(torch.float64)
+        pref = sample_simplex(d=self.n_obj, n=self.n_candidate).to(**tkwargs)
         pref = torch.clamp(pref, min=1.e-6) 
         
         # generate correponding solutions, get the predicted mean/std
         with torch.no_grad():
-            candidate_x = self.psmodel(pref).to(torch.float64) 
+            candidate_x = self.psmodel(pref).to(**tkwargs)
             candidate_mean, candidata_std = self.GPModelList.evaluate(candidate_x, calc_std=True, calc_gradient=False) 
         xis, dir_vecs = self._get_xis(pref)  
-        EIDs = torch.zeros(self.n_candidate,self.n_candidate)
+        EIDs = torch.zeros(self.n_candidate,self.n_candidate).to(**tkwargs)
         for i in range(self.n_candidate):
             temp_mean = candidate_mean[i:i+1].repeat(self.n_candidate,1)
             temp_std = candidata_std[i:i+1].repeat(self.n_candidate,1)
@@ -108,7 +109,7 @@ class PSLDirHVEISolver(BayesianPSL):
             EIDs[i,:] = torch.prod(alpha_i, dim=1)  
         Qb = []
         temp = EIDs.clone()
-        beta = torch.zeros(self.n_candidate)  
+        beta = torch.zeros(self.n_candidate).to(**tkwargs)  
         for i in range(batch_size):
             index = torch.argmax(torch.sum(temp, dim=1))
             Qb.append(index.item())
@@ -125,16 +126,19 @@ if __name__ == '__main__':
     import time
     from utils.lhs import lhs
     import matplotlib.pyplot as plt
-    from test_functions import ZDT1
-    
+    from test_functions import ZDT2
+    tkwargs = {
+        "dtype": torch.double,
+        "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    }
     # minimization
-    problem = ZDT1(n_obj=2,n_dim=8)
+    problem = ZDT2(n_obj=2,n_dim=8)
     n_init = 11*problem.n_dim-1
     batch_size = 5
     maxFE = 200
     ts = time.time()
  
-    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init))
+    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init)).to(**tkwargs)
     y_init = problem.evaluate(x_init)
     solver = PSLDirHVEISolver(problem, maxFE, batch_size, x_init, y_init)
     res = solver.solve()

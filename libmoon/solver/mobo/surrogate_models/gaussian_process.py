@@ -8,7 +8,10 @@ from scipy.spatial.distance import cdist
 
 from .base import SurrogateModel
 import torch
-device = 'cpu'
+tkwargs = {
+    "dtype": torch.double,
+    "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+}
 
 def safe_divide(x1, x2):
     '''
@@ -59,10 +62,13 @@ class GaussianProcess(SurrogateModel):
             self.gps.append(gp)
 
     def fit(self, X, Y):
+        X = X.to('cpu')
+        Y = Y.to('cpu')
         for i, gp in enumerate(self.gps):
             gp.fit(X, Y[:, i])
         
     def evaluate(self, X, calc_std=False, calc_gradient=False):
+        X = X.to('cpu')
         F, dF, hF = [], [], [] # mean
         S, dS, hS = [], [], [] # std
 
@@ -137,16 +143,16 @@ class GaussianProcess(SurrogateModel):
                         dy_std=np.zeros(dy_var.shape)
                     dS.append(dy_std)
  
-        F = torch.from_numpy(np.stack(F, axis=1)).to(device) 
+        F = torch.from_numpy(np.stack(F, axis=1)).to(**tkwargs) 
         if not calc_std:
             return F 
         
-        S = torch.from_numpy(np.stack(S, axis=1)).to(device) 
+        S = torch.from_numpy(np.stack(S, axis=1)).to(**tkwargs) 
         if not calc_gradient: 
             return F, S 
         
-        dF = torch.from_numpy(np.stack(dF, axis=1)).to(device) 
-        dS = torch.from_numpy(np.stack(dS, axis=1)).to(device) 
+        dF = torch.from_numpy(np.stack(dF, axis=1)).to(**tkwargs) 
+        dS = torch.from_numpy(np.stack(dS, axis=1)).to(**tkwargs) 
         return F, S, dF, dS
         
         

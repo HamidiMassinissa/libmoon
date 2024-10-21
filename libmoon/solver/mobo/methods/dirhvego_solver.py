@@ -75,7 +75,8 @@ class DirHVEGOSolver(object):
         params_H =  [199,19] # parameter for weight vectors, for M = 2,3 respectively.
         if self.n_obj == 2 or self.n_obj == 3:
             # simplex-lattice design
-            self.ref_vecs = torch.from_numpy(get_reference_directions("uniform", self.n_obj, n_partitions=params_H[self.n_obj-2]))
+            weights = get_reference_directions("uniform", self.n_obj, n_partitions=params_H[self.n_obj-2])
+            self.ref_vecs = torch.from_numpy(weights).to(**tkwargs)
         else:
             # TODO
             pass
@@ -135,7 +136,7 @@ class DirHVEGOSolver(object):
         self.ymin, _ = torch.min(self.archive_y, dim=0)
         self.ymax, _ = torch.max(self.archive_y, dim=0)
         self.train_y = torch.div(torch.sub(self.archive_y, self.ymin), torch.sub(self.ymax, self.ymin))   
-        self.z =  -0.01*torch.ones((1,self.n_obj))  
+        self.z =  -0.01*torch.ones((1,self.n_obj)).to(**tkwargs)  
         self.train_y_nds = self.train_y[self.FrontNo[0]].clone()
         
         # train GP surrogate models  
@@ -155,7 +156,7 @@ class DirHVEGOSolver(object):
         # Find q solutions with the greedy algorithm
         # Compute EI_D for all the points in Q
         pop_size = self.ref_vecs.shape[0]
-        EIDs = torch.zeros(pop_size,pop_size)
+        EIDs = torch.zeros(pop_size,pop_size).to(**tkwargs)
         for i in range(pop_size):
             temp_mean = candidate_mean[i:i+1].repeat(pop_size,1)
             temp_std = candidata_std[i:i+1].repeat(pop_size,1)
@@ -163,7 +164,7 @@ class DirHVEGOSolver(object):
  
         Qb = []
         temp = EIDs.clone()
-        beta = torch.zeros(pop_size)
+        beta = torch.zeros(pop_size).to(**tkwargs)
         for i in range(batch_size):
             index = torch.argmax(torch.sum(temp, dim=1))
             Qb.append(index.item())
@@ -202,14 +203,14 @@ class DirHVEGOSolver(object):
 
     def _moead_gr(self, ref_vecs: Tensor, pref_incs: Tensor)->Tuple[Tensor,Tensor,Tensor]:
         # using MOEA/D-GR to solve subproblems
-        maxIter = 50
+        maxIter = 100
         pop_size = self.ref_vecs.shape[0] # pop_size
         T = int(np.ceil(0.1 * pop_size).item())  # size of neighbourhood: 0.1*N
         B = torch.argsort(torch.cdist(ref_vecs, ref_vecs), dim=1)[:, :T]
  
 
         # the initial population for MOEA/D
-        x_ini = torch.from_numpy(lhs(self.n_dim,samples=pop_size))
+        x_ini = torch.from_numpy(lhs(self.n_dim,samples=pop_size)).to(**tkwargs)
         pop_x = (self._upper_x-self._lower_x)*x_ini + self._lower_x
         # gp poterior
         pop_mean, pop_std = self.GaussianProcess.evaluate(pop_x, calc_std=True, calc_gradient=False) 
@@ -264,8 +265,8 @@ class DirHVEGOSolver(object):
         Upper = self._upper_x
 
         U_L = Upper - Lower
-        Site = torch.rand(N, D) < proM / D
-        mu = torch.rand(N, D)
+        Site = torch.rand(N, D).to(**tkwargs) < proM / D
+        mu = torch.rand(N, D).to(**tkwargs)
         temp = torch.logical_and(Site, mu <= 0.5)
         Offspring = torch.min(torch.max(Offspring, Lower), Upper)
      
@@ -283,7 +284,8 @@ class DirHVEGOSolver(object):
     
     def plot_objs(self):
         fig = plt.figure()
-        plt.scatter(self.archive_y_nds[...,0], self.archive_y_nds[...,1], label=self.solver_name)
+        archive_y_nds = self.archive_y_nds.to('cpu')
+        plt.scatter(archive_y_nds[...,0], archive_y_nds[...,1], label=self.solver_name)
         if hasattr(self.problem, '_get_pf'):
             plt.plot(self.problem._get_pf()[:,0], self.problem._get_pf()[:,1], label='PF')
 
@@ -296,16 +298,16 @@ if __name__ == '__main__':
     import time
     from utils.lhs import lhs
     import matplotlib.pyplot as plt
-    from test_functions import ZDT3
+    from test_functions import ZDT1
     
     # minimization
-    problem = ZDT3(n_obj=2,n_dim=8)
+    problem = ZDT1(n_obj=2,n_dim=8)
     n_init = 11*problem.n_dim-1
     batch_size = 5
     maxFE = 200
     ts = time.time()
  
-    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init))
+    x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init)).to(**tkwargs)
     y_init = problem.evaluate(x_init)
     solver = DirHVEGOSolver(problem, maxFE, batch_size, x_init, y_init)
     solver.debug = True

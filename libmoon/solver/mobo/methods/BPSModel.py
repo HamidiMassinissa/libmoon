@@ -5,7 +5,8 @@ Bayesian Pareto Set Model
 import torch
 import torch.nn as nn
 from torch import Tensor
-torch.set_default_dtype(torch.float64)
+ 
+ 
 
 class BayesianPSModel(torch.nn.Module):
     def __init__(self, n_obj: int, n_dim: int):
@@ -26,7 +27,7 @@ class BayesianPSModel(torch.nn.Module):
         
         x = torch.sigmoid(x) 
         
-        return x.to(torch.double)
+        return x.to(torch.float64)
     
    
     

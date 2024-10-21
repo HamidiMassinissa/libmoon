@@ -14,7 +14,8 @@ import os.path
 import sys
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from surrogate_models import GPModelList,GaussianProcess
+from surrogate_models import GaussianProcess,GPModelList 
+ 
 
 import numpy as np
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
@@ -82,7 +83,7 @@ class BayesianPSL(object):
         self.ymin, _ = torch.min(self.archive_y, dim=0)
         self.ymax, _ = torch.max(self.archive_y, dim=0)
         self.train_y = torch.div(torch.sub(self.archive_y, self.ymin), torch.sub(self.ymax, self.ymin))   
-        self.z =  -0.1*torch.ones((1,self.n_obj))  
+        self.z =  -0.1*torch.ones((1,self.n_obj)).to(**tkwargs)   
         self.train_y_nds = self.train_y[self.FrontNo[0]].clone()
         
         # train GP surrogate models  
