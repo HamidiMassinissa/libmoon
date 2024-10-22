@@ -135,12 +135,13 @@ if __name__ == '__main__':
     problem = ZDT2(n_obj=2,n_dim=8)
     n_init = 11*problem.n_dim-1
     batch_size = 5
-    maxFE = 200
+    maxFE = 100
     ts = time.time()
  
     x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init)).to(**tkwargs)
     y_init = problem.evaluate(x_init)
     solver = PSLDirHVEISolver(problem, maxFE, batch_size, x_init, y_init)
+    solver.debug = True
     res = solver.solve()
     elapsed = time.time() - ts
     res['elapsed'] = elapsed

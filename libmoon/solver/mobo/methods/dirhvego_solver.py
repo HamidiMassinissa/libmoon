@@ -16,7 +16,7 @@ from botorch.utils.probability.utils import (
     ndtr as Phi, # Standard normal CDF
     phi, # Standard normal PDF
 )
-
+import matplotlib.pyplot as plt
 import os
 import os.path
 import sys
@@ -55,6 +55,7 @@ class DirHVEGOSolver(object):
         # metric
         self.HV = Hypervolume(ref_point=-problem.ref_point) # minimization problem
         self.hv_list = np.zeros(shape=(0,1),dtype=float)
+        self.FE = np.zeros(shape=(0,1),dtype=float)
         
         # initial samples
         if x_init.shape[0] != y_init.shape[0] or x_init.shape[1] != self.n_dim or y_init.shape[1] != self.n_obj:
@@ -89,8 +90,8 @@ class DirHVEGOSolver(object):
             print('Iteration: %d, FE: %d HV: %.4f' % (i, self.archive_x.shape[0],self.hv_list[-1,0]))
             
         res = {}
-        res['x'] = self.archive_x.detach().numpy()
-        res['y'] = self.archive_y.detach().numpy()
+        res['x'] = self.archive_x.to('cpu')
+        res['y'] = self.archive_y.to('cpu')
         res['FrontNo'] = self.FrontNo
         res['hv'] = self.hv_list
         return res
@@ -195,6 +196,7 @@ class DirHVEGOSolver(object):
         self.archive_y_nds = self.archive_y[self.FrontNo[0]].clone()
         # minimization problem
         self.hv_list = np.append(self.hv_list,[[self.HV.compute(-self.archive_y_nds)]],axis=0)
+        self.FE = np.append(self.FE,[[self.archive_x.shape[0]]],axis=0)
         
         if self.debug:
             self.plot_objs()
@@ -304,7 +306,7 @@ if __name__ == '__main__':
     problem = ZDT1(n_obj=2,n_dim=8)
     n_init = 11*problem.n_dim-1
     batch_size = 5
-    maxFE = 200
+    maxFE = 100
     ts = time.time()
  
     x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init)).to(**tkwargs)

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from torch import Tensor
 from typing import Tuple 
 from botorch.utils.multi_objective.hypervolume import Hypervolume
-
+import matplotlib.pyplot as plt
 import os
 import os.path
 import sys
@@ -37,10 +37,12 @@ class BayesianPSL(object):
         self.max_iter = math.ceil((MAX_FE - x_init.shape[0])/BATCH_SIZE)
         self.archive_x = None
         self.archive_y = None
+        self.debug = False
         
         # metric
         self.HV = Hypervolume(ref_point=-problem.ref_point) # minimization problem
         self.hv_list = np.zeros(shape=(0,1),dtype=float)
+        self.FE = np.zeros(shape=(0,1),dtype=float)
         
         # initial samples
         if x_init.shape[0] != y_init.shape[0] or x_init.shape[1] != self.n_dim or y_init.shape[1] != self.n_obj:
@@ -65,8 +67,8 @@ class BayesianPSL(object):
             print('Iteration: %d, FE: %d HV: %.4f' % (i, self.archive_x.shape[0],self.hv_list[-1,0]))
             
         res = {}
-        res['x'] = self.archive_x.detach().numpy()
-        res['y'] = self.archive_y.detach().numpy()
+        res['x'] = self.archive_x.to('cpu')
+        res['y'] = self.archive_y.to('cpu')
         res['FrontNo'] = self.FrontNo
         res['hv'] = self.hv_list
         return res
@@ -116,6 +118,22 @@ class BayesianPSL(object):
         # TODO
         NDSort = NonDominatedSorting()
         self.FrontNo = NDSort.do(self.archive_y.detach().cpu().numpy())
-        archive_y_nds = self.archive_y[self.FrontNo[0]].clone()
+        self.archive_y_nds = self.archive_y[self.FrontNo[0]].clone()
         # minimization problem
-        self.hv_list = np.append(self.hv_list,[[self.HV.compute(-archive_y_nds)]],axis=0)
+        self.hv_list = np.append(self.hv_list,[[self.HV.compute(-self.archive_y_nds)]],axis=0)
+        self.FE = np.append(self.FE,[[self.archive_x.shape[0]]],axis=0)
+        
+        if self.debug:
+            self.plot_objs()
+            
+    def plot_objs(self):
+        fig = plt.figure()
+        archive_y_nds = self.archive_y_nds.to('cpu')
+        plt.scatter(archive_y_nds[...,0], archive_y_nds[...,1], label=self.solver_name)
+        if hasattr(self.problem, '_get_pf'):
+            plt.plot(self.problem._get_pf()[:,0], self.problem._get_pf()[:,1], label='PF')
+
+        plt.legend(fontsize=16)
+        plt.xlabel('$f_1$', fontsize=18)
+        plt.ylabel('$f_2$', fontsize=18)
+        plt.show()
