@@ -166,12 +166,12 @@ eval_y = problem.evaluate(model(Tensor(prefs).cuda()))
 
 | **Name**               | **Institution** | **Role**                                     |
 |------------------------|-----------------|----------------------------------------------|
-| **Xiaoyuan Zhang (*)** | CityUHK         | Pareto set learning/MOO solvers/Project lead |
-| **Liang Zhao (*)**     | CityUHK         | MOBO                                         |
-| **Yingying Yu (*)**    | CityUHK         | Software design                              |
+| **Xiaoyuan Zhang** | CityUHK         | Pareto set learning/MOO solvers/Project lead |
+| **Liang Zhao**     | CityUHK         | Software design                                         |
+| **Yingying Yu**    | CityUHK         | Software design                              |
 | **Xi Lin**             | CityUHK         | Software design                              |
 
-(*): The first three authors contribute equally to this work. 
+
 
 ## 4.3 Advisory Board
 We sincernely thank the following contributors for their valuable contributions or feedbacks. We also want thanks for our collobrators from XDU, SZU, SUSTech, ECNU, NEU, SEU for their early use of our code.
