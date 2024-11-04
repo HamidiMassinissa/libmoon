@@ -1,3 +1,1 @@
-from .ModelListGP import GPModelList
-from .gaussian_process import GaussianProcess
- 
+from .ModelListGP import GPModelList 

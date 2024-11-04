@@ -14,7 +14,7 @@ import os.path
 import sys
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from surrogate_models import GaussianProcess,GPModelList 
+from surrogate_models import GPModelList 
  
 
 import numpy as np

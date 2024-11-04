@@ -100,7 +100,7 @@ if __name__ == '__main__':
     import time
     from utils.lhs import lhs
     import matplotlib.pyplot as plt
-    from test_functions import ZDT1
+    from test_functions import ZDT1,ZDT2,ZDT3,ZDT4,ZDT6
     tkwargs = {
         "dtype": torch.double,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     problem = ZDT1(n_obj=2,n_dim=8)
     n_init = 11*problem.n_dim-1
     batch_size = 5
-    maxFE = 100
+    maxFE = 200
     ts = time.time()
  
     x_init = torch.from_numpy(lhs(problem.n_dim, samples=n_init)).to(**tkwargs)

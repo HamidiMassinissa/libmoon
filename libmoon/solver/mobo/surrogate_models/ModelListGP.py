@@ -3,9 +3,6 @@ import torch
 from torch import Tensor
 from typing import Optional, Tuple 
 
-
-from gpytorch.kernels import ScaleKernel, MaternKernel, RBFKernel
-
 from botorch.models.gp_regression import SingleTaskGP  
 from botorch.models.transforms.outcome import Standardize
 from botorch import fit_gpytorch_mll
@@ -37,7 +34,6 @@ class GPModelList():
             train_yvar = torch.full_like(train_obj, 1e-4) # noise-free setting
             models.append(
                 SingleTaskGP(train_x, train_obj, train_yvar,
-                             covar_module = ScaleKernel(RBFKernel()),
                              outcome_transform=Standardize(m=1))
             )
         self.model = ModelListGP(*models)
