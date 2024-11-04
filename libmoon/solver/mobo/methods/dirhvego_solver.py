@@ -299,7 +299,7 @@ if __name__ == '__main__':
     import time
     from utils.lhs import lhs
     import matplotlib.pyplot as plt
-    from test_functions import ZDT1,ZDT2,ZDT3,ZDT4,ZDT6
+    from test_functions import ZDT1,ZDT2,ZDT3,ZDT6
     
     # minimization
     problem = ZDT1(n_obj=2,n_dim=8)

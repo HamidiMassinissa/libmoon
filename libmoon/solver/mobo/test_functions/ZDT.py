@@ -86,22 +86,6 @@ class ZDT3(ZDT):
         f2 = 1 - torch.sqrt(f1) - f1 * torch.sin(10 * math.pi * f1)
         return torch.stack((f1, f2), axis=1)
 
-  
-    
-class ZDT4(ZDT):
- 
-    def evaluate(self, X: Tensor) -> Tensor:
-        f_0 = X[..., 0]
-        X_ = -5 + X[...,1:]*10  # x_i \in [-5,5]
-        g = 1 + 10*(self.dim-1)+torch.sum(X_.pow(2)-10*torch.cos(4*math.pi*X_),dim=-1)
-        f_1 = g * (1 - (f_0 / g).sqrt())
-        return torch.stack([f_0, f_1], dim=-1)
-    
-    def _get_pf(self, n_points: int = 100):
-        f1 = torch.linspace(0, 1, n_points)
-        f2 = 1 - torch.sqrt(f1)
-        return torch.stack((f1, f2), axis=1)
-
     
     
 class ZDT6(ZDT):
