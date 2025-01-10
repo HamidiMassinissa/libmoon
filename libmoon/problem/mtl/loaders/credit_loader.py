@@ -29,8 +29,8 @@ def load_dataset(path, s_label):
     x = StandardScaler().fit(data1).transform(data1)
     y = data['default.payment.next.month'].values
     s = data[s_label].values
-    return x, y, s
 
+    return x, y, s
 
 
 class Credit(torch.utils.data.Dataset):
@@ -38,10 +38,11 @@ class Credit(torch.utils.data.Dataset):
     def __init__(self, split, sensible_attribute='SEX'):
         assert split in ['train', 'val', 'test']
 
-        from libmoon.util.constant import root_name
-        path = os.path.join(root_name, 'libmoon', 'problem', 'mtl', 'mtl_data', 'credit', "credit.csv")
+        folder_name = os.path.dirname(os.path.dirname(__file__))
+        path = os.path.join(folder_name, 'mtldata', "credit.csv")
 
         x, y, s = load_dataset(path, sensible_attribute)
+
         x = torch.from_numpy(x).float()
         y = torch.from_numpy(y).long()
         s = torch.from_numpy(s).long()

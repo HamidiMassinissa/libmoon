@@ -1,21 +1,12 @@
-'''
-    This file define the MO-Mnist problem as first proposed in Pareto multitask learning in Section 6.1.
-'''
 import matplotlib.pyplot as plt
+from libmoon.util_global.constant import root_name
+from libmoon.problem.mtl.loaders.multimnist_loader import MultiMNISTData
 import torch
 
-from libmoon.util.constant import root_name
-from libmoon.problem.mtl.loaders.multimnist_loader import MultiMNISTData
 from libmoon.problem.mtl.objectives import CrossEntropyLoss
-from libmoon.problem.mtl.model.lenet import MultiLeNet
-from libmoon.util.prefs import uniform_pref
-from libmoon.util.constant import FONT_SIZE
-
-from libmoon.solver.gradient import get_core_solver
-from libmoon.solver.gradient import get_grads_from_model, numel_params
-
-
-from libmoon.util.constant import is_pref_based
+from libmoon.problem.mtl.model.simple import MultiLeNet
+from libmoon.util_global.weight_factor.funs import uniform_pref
+from libmoon.util_global.constant import FONT_SIZE
 
 loss_1 = CrossEntropyLoss(label_name='labels_l', logits_name='logits_l')
 loss_2 = CrossEntropyLoss(label_name='labels_r', logits_name='logits_r')
@@ -24,14 +15,18 @@ from tqdm import tqdm
 import numpy as np
 from numpy import array
 import os
-
+from libmoon.solver.gradient import get_core_solver
+from libmoon.solver.gradient.utils.util import get_grads_from_model, numel_params
+from libmoon.util_global.constant import is_pref_based
 import itertools
+
+from libmoon.metrics import compute_indicators
 
 
 class MultiMnistProblem:
 
     # How to train at the same time.
-    def __init__(self, args):
+    def __init__(self, args, prefs):
         self.dataset = MultiMNISTData('mnist', 'train')
         self.args = args
         self.loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.args.batch_size, shuffle=True,
@@ -41,7 +36,10 @@ class MultiMnistProblem:
                                                        num_workers=0)
 
         self.lr = args.lr
-        self.model_arr = [MultiLeNet([1, 36, 36]) for _ in range(self.args.n_prob)]
+        self.prefs = prefs
+        self.n_prob = len(prefs)
+
+        self.model_arr = [MultiLeNet([1, 36, 36]) for _ in range(self.n_prob)]
         num_params = numel_params(self.model_arr[0])
         print('num_params: ', num_params)
         for model in self.model_arr:
@@ -58,17 +56,13 @@ class MultiMnistProblem:
             self.set_optimizer = torch.optim.Adam(itertools.chain(*params), lr=0.01)
 
 
-    def optimize(self, prefs=[]):
-
-        self.prefs = prefs
-        self.n_prob = len(prefs)
-
+    def optimize(self):
         loss_all = []
         for _ in tqdm(range(self.args.num_epoch)):
             if self.is_pref_flag:
-                loss_hostory = [ [] for i in range(self.n_prob) ]
+                loss_history = [ [] for i in range(self.n_prob) ]
             else:
-                loss_hostory = []
+                loss_history = []
 
             for data in self.loader:
                 data_ = {k: v.to(self.args.device) for k, v in data.items()}
@@ -109,7 +103,7 @@ class MultiMnistProblem:
                         self.optimizer_arr[pref_idx].step()
                         l1_np = np.array(l1.cpu().detach().numpy(), copy=True)
                         l2_np = np.array(l2.cpu().detach().numpy(), copy=True)
-                        loss_hostory[pref_idx].append([l1_np, l2_np])
+                        loss_history[pref_idx].append([l1_np, l2_np])
 
                 else:
                     # set based method is more complicated.
@@ -133,18 +127,16 @@ class MultiMnistProblem:
                     self.set_optimizer.zero_grad()
                     torch.sum(alpha * losses_ts).backward()
                     self.set_optimizer.step()
-                    loss_hostory.append(losses)
+                    loss_history.append(losses)
 
-            loss_hostory = np.array(loss_hostory)
+            loss_history = np.array(loss_history)
             if args.is_pref_based:
-                loss_history_mean = np.mean(loss_hostory, axis=1)
+                loss_history_mean = np.mean(loss_history, axis=1)
             else:
-                loss_history_mean = np.mean(loss_hostory, axis=0)
+                loss_history_mean = np.mean(loss_history, axis=0)
             loss_all.append(loss_history_mean)
 
         return loss_all
-
-
 
 
 
@@ -162,7 +154,7 @@ if __name__ == '__main__':
     parser.add_argument('--agg-mtd', default='ls', type=str)   # This att is only valid when args.solver=agg.
     parser.add_argument('--solver', default='agg', type=str)
     parser.add_argument('--n-obj', default=2, type=int)   # This att is only valid when args.solver=agg.
-    parser.add_argument('--debug', default=True, type=bool)   # This att is only valid when args.solver=agg.
+
 
     args = parser.parse_args()
     args.is_pref_based = is_pref_based(args.solver)
@@ -173,7 +165,6 @@ if __name__ == '__main__':
         args.device = torch.device("cpu")  # Use the CPU
         print('cuda is not available')
 
-
     prefs = uniform_pref(n_partition=10, n_obj=2, clip_eps=0.1)
     args.n_prob = len(prefs)
     problem = MultiMnistProblem(args, prefs)
@@ -182,19 +173,20 @@ if __name__ == '__main__':
     loss_history = np.array(loss_history)
     final_solution = loss_history[-1,:,:]
 
-    for idx in range(loss_history.shape[0]):
-        if idx==0:
-            plt.plot(loss_history[:,idx,0], loss_history[:,idx,1], 'o-', label='pref {}'.format(idx))
-        else:
-            plt.plot(loss_history[:,idx,0], loss_history[:,idx,1], 'o-')
+    for idx in range(loss_history.shape[1]):
+        plt.plot(loss_history[:,idx,0], loss_history[:,idx,1], 'o-', label='pref {}'.format(idx))
 
+    indicators = compute_indicators(final_solution, prefs)
+    # print( indicators )
 
+    for (k,v) in indicators.items() :
+        print( f'{k}: {v}' )
 
     plt.plot(final_solution[:,0], final_solution[:,1], color='k', linewidth=3)
     plt.legend(fontsize=FONT_SIZE)
     # draw pref
     solution_norm = np.linalg.norm(final_solution, axis=1, keepdims=True)
-    prefs_norm = prefs / np.linalg.norm(prefs, axis=1, keepdims=True) * np.max(solution_norm)
+    prefs_norm = prefs / np.linalg.norm(prefs, axis=1, keepdims=True) * solution_norm
 
     if args.is_pref_based:
         for pref in prefs_norm:

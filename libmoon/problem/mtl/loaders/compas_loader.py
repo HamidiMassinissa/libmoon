@@ -1,9 +1,11 @@
 import torch
 import os
 import pandas as pd
+
 from datetime import datetime
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
 
 def load_dataset(path, s_label):
 
@@ -34,6 +36,8 @@ def load_dataset(path, s_label):
 
     # data['length_of_stay'] = data['length_of_stay'].astype('timedelta64[h]')  # modified by xz, 11.6
     data['length_of_stay'] = data['length_of_stay'].dt.days
+
+
     data = data.drop(['c_jail_in', 'c_jail_out'], axis=1)
 
     # encode sex
@@ -48,8 +52,8 @@ def load_dataset(path, s_label):
     x = StandardScaler().fit(data1).transform(data1)
     y = data['two_year_recid'].values
     s = data['sex'].values
-    return x, y, s
 
+    return x, y, s
 
 
 class Compas(torch.utils.data.Dataset):
@@ -57,11 +61,11 @@ class Compas(torch.utils.data.Dataset):
     def __init__(self, split, sensible_attribute='sex'):
         assert split in ['train', 'val', 'test']
 
-        from libmoon.util_global.constant import root_name
-        # folder_name = os.path.dirname(os.path.dirname(__file__))
-        path = os.path.join(root_name, 'libmoon', 'problem', 'mtl', 'mtl_data', 'compas', "compas.csv")
+        folder_name = os.path.dirname(os.path.dirname(__file__))
+        path = os.path.join(folder_name, 'mtldata', "compas.csv")
 
         x, y, s = load_dataset(path, sensible_attribute)
+
         x = torch.from_numpy(x).float()
         y = torch.from_numpy(y).long()
         s = torch.from_numpy(s).long()
@@ -95,11 +99,3 @@ class Compas(torch.utils.data.Dataset):
     
     def task_names(self):
         return None
-
-
-if __name__ == "__main__":
-    from torch.utils import data
-    dataset = Compas(split="train")
-    trainloader = data.DataLoader(dataset, batch_size=256, num_workers=0)
-    for i, data in enumerate(trainloader):
-        print()

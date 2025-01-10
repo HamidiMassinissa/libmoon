@@ -4,12 +4,12 @@ from sklearn.model_selection import train_test_split
 # taken from https://github.com/Xi-L/ParetoMTL and adapted
 import os
 
-from libmoon.util.constant import root_name
+from libmoon.util_global.constant import root_name
 
 
 class MultiMNISTData(torch.utils.data.Dataset):
     """
-        The datasets from ParetoMTL
+    The datasets from ParetoMTL
     """
     def __init__(self, dataset, split, root='data/multi', **kwargs):
         assert dataset in ['mnist', 'fashion', 'fmnist']
@@ -17,17 +17,19 @@ class MultiMNISTData(torch.utils.data.Dataset):
 
         # equal size of val and test split
         train_split = .9
-        middle_folder_name = os.path.join('libmoon', 'problem', 'mtl','mtl_data','multimnist')
+
         if dataset == 'mnist':
-            self.path = os.path.join(root_name, middle_folder_name, 'mnist.pickle')
+            self.path = os.path.join(root_name, 'problem', 'mtl', 'data', 'multimnist', 'mnist.pickle')
+
         elif dataset == 'fashion':
-            self.path = os.path.join(root_name, middle_folder_name, 'fashion.pickle')
+            self.path = os.path.join(root_name, 'problem', 'mtl', 'data', 'multimnist', 'fashion.pickle')
+
         elif dataset == 'fmnist':
-            self.path = os.path.join(root_name, middle_folder_name, 'fmnist.pickle')
+            self.path = os.path.join(root_name, 'problem', 'mtl', 'data', 'multimnist', 'fmnist.pickle')
+
 
         self.val_size = .1
         with open(self.path, 'rb') as f:
-            # D:\pycharm_project\libmoon\libmoon\problem\mtl\mtl_data\multimnist\mnist.pickle
             trainX, trainLabel, testX, testLabel = pickle.load(f)
 
         n_train = len(trainX)
@@ -69,11 +71,14 @@ class MultiMNISTData(torch.utils.data.Dataset):
         return ['l', 'r']
 
 
+
+
+
+
+
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
-
     dst = MultiMNISTData(dataset='mnist', split='val')
-
     loader = torch.utils.data.DataLoader(dst, batch_size=10, shuffle=True, num_workers=0)
 
     for dat in loader:
@@ -86,7 +91,6 @@ if __name__ == '__main__':
             for i in range(2):
                 axarr[i][j].imshow(ims[j * 2 + i, :, :], cmap='gray')
                 axarr[i][j].set_title('{}_{}'.format(labs_l[j * 2 + i], labs_r[j * 2 + i]))
-
         plt.show()
         a = input()
 

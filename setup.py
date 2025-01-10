@@ -7,10 +7,10 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='libmoon',
-    version='0.2.2',
+    version='0.1.11',
     author='Xiaoyuan Zhang et al.',
     author_email='xzhang2523-c@my.cityu.edu.hk',
-    description='LibMOON: A Gradient-based MultiObjective OptimizatioN Library in PyTorch',
+    description='Moon, Make MOO great again',
     packages=find_packages(
         # include=['solver.gradient.epo_solver',
         #          'solver.gradient',
@@ -23,7 +23,7 @@ setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.11',
-    install_requires=['numpy==1.26.2',
+    install_requires=['numpy==1.26.4',
                     'torch==2.2.1',
                     'matplotlib==3.8.3',
                     'tqdm==4.66.2',
@@ -31,7 +31,7 @@ setup(
                     'cvxopt==1.3.2',
                     'cvxpy==1.4.2',
                     'ffmpeg-python',
-                    'ffmpeg',
+                      'ffmpeg',
                     'scikit-learn'
                       ],
     long_description=long_description,

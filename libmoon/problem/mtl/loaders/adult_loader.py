@@ -5,12 +5,13 @@ import torch
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch.utils import data
-from libmoon.util.constant import root_name
+from libmoon.util_global.constant import root_name
 
 
 
 
 def load_dataset(path, s_label):
+    # print()
     data = pd.read_csv(path)
     # Preprocessing taken from https://www.kaggle.com/islomjon/income-prediction-with-ensembles-of-decision-trees
     # replace missing values with majority class
@@ -58,14 +59,19 @@ def load_dataset(path, s_label):
 
 
 
-class Adult(data.Dataset):
+class ADULT(data.Dataset):
 
 
     def __init__(self, split="train", sensible_attribute="gender"):
         assert split in ["train", "val", "test"]
+
         # folder_name = os.path.dirname( os.path.dirname(__file__) )
 
-        path = os.path.join(root_name, 'libmoon', 'problem', 'mtl', 'mtl_data', 'adult', "adult.csv")
+
+
+
+        path = os.path.join(root_name, 'mtldata', "adult.csv")
+
         x, y, s1 = load_dataset(path, sensible_attribute)
 
 
@@ -109,3 +115,10 @@ class Adult(data.Dataset):
         return None
 
 
+    
+if __name__ == "__main__":
+    dataset = ADULT(split="train")
+    trainloader = data.DataLoader(dataset, batch_size=256, num_workers=0)
+
+    for i, data in enumerate(trainloader):
+        break
