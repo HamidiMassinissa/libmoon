@@ -59,7 +59,7 @@ def load_dataset(path, s_label):
 
 
 
-class ADULT(data.Dataset):
+class Adult(data.Dataset):
 
 
     def __init__(self, split="train", sensible_attribute="gender"):
@@ -117,7 +117,7 @@ class ADULT(data.Dataset):
 
     
 if __name__ == "__main__":
-    dataset = ADULT(split="train")
+    dataset = Adult(split="train")
     trainloader = data.DataLoader(dataset, batch_size=256, num_workers=0)
 
     for i, data in enumerate(trainloader):

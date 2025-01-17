@@ -22,8 +22,8 @@ class DspritesData(torch.utils.data.Dataset):
         if dataset == 'dsprites':
             self.path = os.path.join(root_name, 'problem', 'mtl', 'data', 'dsprites', 'dsprites_ndarray_co1sh3sc6or40x32y32_64x64.npz')
 
-        self.test_size = .1
-        self.val_size = .1
+        self.test_size = 0.1
+        self.val_size = 0.1
         with open(self.path, 'rb') as f:
             with np.load(f) as data:
                 trainX = data['imgs']
@@ -44,24 +44,21 @@ class DspritesData(torch.utils.data.Dataset):
             n_train = len(trainX)
             n_val = len(valX)
 
-        trainX = torch.from_numpy(trainX.reshape(n_train, 1, 64, 64)).float()
-        trainLabel = torch.from_numpy(trainLabel).long()
-        testX = torch.from_numpy(testX.reshape(n_test, 1, 64, 64)).float()
-        testLabel = torch.from_numpy(testLabel).long()
-
-        if self.val_size > 0:
-            valX = torch.from_numpy(valX.reshape(n_val, 1, 64, 64)).float()
-            valLabel = torch.from_numpy(valLabel).long()
-
         if split in ['train', 'val']:
-            n = int(len(trainX) * train_split)
             if split == 'val':
+                if self.val_size > 0:
+                    valX = torch.from_numpy(valX.reshape(n_val, 1, 64, 64)).float()
+                    valLabel = torch.from_numpy(valLabel).long()
                 self.X = valX
                 self.y = valLabel
             elif split == 'train':
+                trainX = torch.from_numpy(trainX.reshape(n_train, 1, 64, 64)).float()
+                trainLabel = torch.from_numpy(trainLabel).long()
                 self.X = trainX
                 self.y = trainLabel
         elif split == 'test':
+            testX = torch.from_numpy(testX.reshape(n_test, 1, 64, 64)).float()
+            testLabel = torch.from_numpy(testLabel).long()
             self.X = testX
             self.y = testLabel
 

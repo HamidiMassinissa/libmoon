@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import torch.utils
 from libmoon.util_global.constant import root_name
 from libmoon.problem.mtl.loaders.multimnist_loader import MultiMNISTData
 import torch
@@ -21,19 +22,25 @@ from libmoon.util_global.constant import is_pref_based
 import itertools
 
 from libmoon.metrics import compute_indicators
+from collections import defaultdict
 
+import datetime
+import json
 
 class MultiMnistProblem:
 
     # How to train at the same time.
     def __init__(self, args, prefs):
-        self.dataset = MultiMNISTData('mnist', 'train')
+        self.dataset = MultiMNISTData(args.problem, 'train')
         self.args = args
         self.loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.args.batch_size, shuffle=True,
                                                   num_workers=0)
         self.dataset_test = MultiMNISTData('mnist', 'test')
         self.loader_test = torch.utils.data.DataLoader(self.dataset_test, batch_size=args.batch_size, shuffle=True,
                                                        num_workers=0)
+        self.dataset_val = MultiMNISTData('mnist', 'val')
+        self.loader_val = torch.utils.data.DataLoader(self.dataset_val, batch_size=args.batch_size, shuffle=True,
+                                                      num_workers=0)
 
         self.lr = args.lr
         self.prefs = prefs
@@ -55,6 +62,38 @@ class MultiMnistProblem:
             params = [model.parameters() for model in self.model_arr]
             self.set_optimizer = torch.optim.Adam(itertools.chain(*params), lr=0.01)
 
+    def eval(self):
+        results = defaultdict(list)
+
+        for pref_idx, pref in enumerate(self.prefs):
+            self.model_arr[pref_idx].eval()
+            total = 0.0
+            results['ray'].append(pref.tolist())
+            acc1, acc2 = 0.0, 0.0
+            loss1, loss2 = 0.0, 0.0
+            with torch.no_grad():
+                for batch in self.loader_val:
+                    data_ = {k: v.to(self.args.device) for k, v in batch.items()}
+                    logits = self.model_arr[pref_idx](data_)
+                    logits['labels_l'] = data_['labels_l']
+                    logits['labels_r'] = data_['labels_r']
+                    l1 = loss_1(**logits)
+                    l2 = loss_2(**logits)
+                    loss1 += l1
+                    loss2 += l2
+                    pred1 = logits['logits_l'].max(1).indices
+                    pred2 = logits['logits_r'].max(1).indices
+                    acc1 += pred1.eq(data_['labels_l']).sum()
+                    acc2 += pred2.eq(data_['labels_r']).sum()
+                    total += len(data_['labels_l'])
+
+            results[f'task1_acc'].append(acc1.cpu().item() / total)
+            results[f'task2_acc'].append(acc2.cpu().item() / total)
+            results[f'task1_loss'].append(loss1.cpu().item() / total)
+            results[f'task2_loss'].append(loss2.cpu().item() / total)
+        
+        return results
+        
 
     def optimize(self):
         loss_all = []
@@ -70,7 +109,6 @@ class MultiMnistProblem:
                 if self.is_pref_flag:
                     for pref_idx, (pref, model, optimizer) in enumerate(
                             zip(self.prefs, self.model_arr, self.optimizer_arr)):
-
                         logits_dict = self.model_arr[pref_idx](data_)
                         logits_dict['labels_l'] = data_['labels_l']
                         logits_dict['labels_r'] = data_['labels_r']
@@ -138,9 +176,8 @@ class MultiMnistProblem:
 
         return loss_all
 
-
-
 if __name__ == '__main__':
+    current_time = datetime.datetime.now().isoformat()
 
     import argparse
     parser = argparse.ArgumentParser()
@@ -157,6 +194,12 @@ if __name__ == '__main__':
 
 
     args = parser.parse_args()
+
+    folder_name = os.path.join( root_name, 'output', args.problem, args.solver)
+    os.makedirs(folder_name, exist_ok=True)
+    with open(os.path.join(folder_name, f'args_{current_time}.json'), "w") as f:
+        json.dump(vars(args), f)
+
     args.is_pref_based = is_pref_based(args.solver)
     if torch.cuda.is_available() and args.use_cuda:
         args.device = torch.device("cuda")  # Use the GPU
@@ -173,11 +216,13 @@ if __name__ == '__main__':
     loss_history = np.array(loss_history)
     final_solution = loss_history[-1,:,:]
 
+    results = problem.eval()
+
     for idx in range(loss_history.shape[1]):
         plt.plot(loss_history[:,idx,0], loss_history[:,idx,1], 'o-', label='pref {}'.format(idx))
 
     indicators = compute_indicators(final_solution, prefs)
-    # print( indicators )
+    # print( indicators )
 
     for (k,v) in indicators.items() :
         print( f'{k}: {v}' )
@@ -192,18 +237,19 @@ if __name__ == '__main__':
         for pref in prefs_norm:
             plt.plot([0, pref[0]], [0, pref[1]], color='k')
 
-
     plt.xlabel('$L_1$', fontsize=FONT_SIZE)
     plt.ylabel('$L_2$', fontsize=FONT_SIZE)
 
-    folder_name = os.path.join( root_name, 'output', args.problem, args.solver)
-    os.makedirs(folder_name, exist_ok=True)
-    fig_name = os.path.join(folder_name, 'final_solution.svg')
+    fig_name = os.path.join(folder_name, f'final_solution_{current_time}.svg')
     plt.savefig(fig_name)
 
+    with open(os.path.join(folder_name, f'indicators_{current_time}.json'), "w") as f:
+        json.dump(str(indicators), f)
+    with open(os.path.join(folder_name, f'val_results_{current_time}.json'), "w") as f:
+        json.dump(results, f)
 
-    plt.title('{}_{}'.format(args.problem, args.solver), fontsize= FONT_SIZE )
+    # plt.title('{}_{}'.format(args.problem, args.solver), fontsize= FONT_SIZE )
 
     print('saved in ', fig_name)
 
-    plt.show()
+    # plt.show()

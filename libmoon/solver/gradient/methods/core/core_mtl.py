@@ -7,14 +7,133 @@ from libmoon.util.mtl import get_dataset
 
 
 import torch
+from torch import nn
 import numpy as np
 from tqdm import tqdm
 from libmoon.util.constant import get_agg_func, root_name
 from libmoon.util.gradient import calc_gradients_mtl, flatten_grads
-from libmoon.model.hypernet import HyperNet, LeNetTarget
+from libmoon.model.hypernet import HyperNet, LeNetTarget, MetaLearner, MetaHyperNet
 from libmoon.util.prefs import get_random_prefs, get_uniform_pref
 from libmoon.util.network import numel
 
+
+class GradBasePSLMTLMetaLearnerSolver:
+    def __init__(self, problem_name, batch_size, step_size, epoch, device, solver_name):
+        self.step_size = step_size
+        self.problem_name = problem_name
+        self.epoch = epoch
+        self.batch_size = batch_size
+        self.device = device
+        self.solver_name = solver_name
+        train_dataset = get_dataset(self.problem_name, type='train')
+        test_dataset = get_dataset(self.problem_name, type='test')
+        self.train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True,
+                                                        num_workers=0)
+        self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True,
+                                                       num_workers=0)
+        
+        # For hypernetwork model, we have the hypernet and target network.
+        self.metanet = MetaLearner()
+        self.hnet = MetaHyperNet(kernel_size=(9, 5)).to(self.device)
+        self.net = LeNetTarget(kernel_size=(9, 5)).to(self.device)
+
+        num_param_hnet, num_param_net = numel(self.hnet), numel(self.net)
+        print('Number of parameters in hnet: {:.2f}M, net: {:.2f}K'.format(num_param_hnet/1e6, num_param_net/1e3))
+
+        self.optimizer = torch.optim.Adam(self.metanet.parameters(), lr=self.step_size)
+        self.dataset = get_dataset(self.problem_name)
+        self.settings = mtl_setting_dict[self.problem_name]
+        self.obj_arr = from_name( self.settings['objectives'], self.dataset.task_names() )
+        self.labels_names = ['labels_' + t for t in self.dataset.task_names()]
+        self.n_tasks = len(self.labels_names)
+        self.is_agg = self.solver_name.startswith('agg')
+        self.agg_name = self.solver_name.split('_')[-1] if self.is_agg else None
+
+        self.gamma = 1e-3
+
+    def solve(self):
+        cross_loss = nn.CrossEntropyLoss()
+        loss_epoch = []
+        for epoch_idx in tqdm(range(self.epoch)):
+            loss_batch = []
+            for batch_idx, batch in enumerate(self.train_loader):
+                ray = torch.from_numpy(
+                    np.random.dirichlet((1, 1), 1).astype(np.float32).flatten()
+                ).to(self.device)  # ray.shape (1,2), everytime, only sample one preference.
+                for k, v in batch.items():
+                    batch[k] = v.to(self.device)
+                # batch['data'].shape: (batch_size, 1, 36, 36)
+                self.hnet.train()
+                # self.optimizer.zero_grad()
+                weights: dict = self.hnet(ray)      # len(weights) = 10
+                num_target = numel(weights)    # numel(weights) = 31910
+                logits_l, logits_r = self.net(batch['data'], weights)
+                logits_array = [logits_l, logits_r]
+
+                loss_vec = torch.stack([obj(logits, batch) for (logits,obj) in zip(logits_array, self.obj_arr)])
+                if self.is_agg:
+                    loss_vec = torch.atleast_2d(loss_vec)
+                    ray = torch.atleast_2d(ray)
+                    loss = get_agg_func(self.agg_name)(loss_vec, ray)
+                elif self.solver_name in ['epo', 'pmgda']:
+                    # Here, we also need the Jacobian matrix.
+                    grads = []
+                    flat_weights: list[torch.Tensor] = [w for w in weights.values()]
+                    for i, loss in enumerate(loss_vec):
+                        g = torch.autograd.grad(loss, flat_weights, retain_graph=True)
+                        flat_grad = torch.cat(g, dim=0)
+                        grads.append(flat_grad)
+                else:
+                    assert False, 'Unknown solver_name'
+                loss_batch.append( loss.cpu().detach().numpy() )
+                loss.backward(retain_graph=True)
+
+                gradients = []
+                for param in self.hnet.parameters():
+                    if param.grad is not None:
+                        gradients.append(param.grad.view(-1))
+                if len(gradients) != 0:
+                    gradients = torch.cat(gradients).unsqueeze(0).unsqueeze(2).to(self.device)
+
+                d = self.metanet(gradients)
+                
+                start_idx = 0
+                with torch.no_grad():
+                    for param in self.hnet.parameters():
+                        num = param.numel()
+                        param_update = d[0, start_idx:start_idx + num].view(param.size())
+                        param += self.gamma * param_update
+                        start_idx += num
+                        print('param', param)
+
+                print(d)
+
+                self.optimizer.zero_grad()
+                self.optimizer.step()
+            loss_epoch.append( np.mean(np.array(loss_batch)) )
+        res = {'train_loss': loss_epoch}
+        print(res)
+        return res
+
+    def eval(self, n_eval):
+        uniform_prefs = torch.Tensor(get_uniform_pref(n_eval)).to(self.device)
+        loss_pref = []
+        for pref_idx, pref in tqdm(enumerate(uniform_prefs)):
+            loss_batch = []
+            for batch_idx, batch in enumerate(self.train_loader):
+                for k, v in batch.items():
+                    batch[k] = v.to(self.device)
+                weights = self.hnet(pref)
+                logits_l, logits_r = self.net(batch['data'], weights)
+                logits_array = [logits_l, logits_r]
+                loss_vec = torch.stack([obj(logits, **batch) for logits, obj in zip(logits_array, self.obj_arr)])
+                loss_batch.append(loss_vec.cpu().detach().numpy())
+            loss_pref.append(np.mean(np.array(loss_batch), axis=0))
+
+        res = {}
+        res['eval_loss'] = np.array(loss_pref)
+        res['prefs'] = uniform_prefs.cpu().detach().numpy()
+        return res
 
 class GradBasePSLMTLSolver:
     def __init__(self, problem_name, batch_size, step_size, epoch, device, solver_name):
@@ -31,6 +150,7 @@ class GradBasePSLMTLSolver:
         self.test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True,
                                                        num_workers=0)
         # For hypernetwork model, we have the hypernet and target network.
+        self.metanet = MetaLearner()
         self.hnet = HyperNet(kernel_size=(9, 5)).to(self.device)
         self.net = LeNetTarget(kernel_size=(9, 5)).to(self.device)
 
@@ -57,12 +177,12 @@ class GradBasePSLMTLSolver:
                 # batch['data'].shape: (batch_size, 1, 36, 36)
                 self.hnet.train()
                 self.optimizer.zero_grad()
-                weights = self.hnet(ray)      # len(weights) = 10
+                weights: dict = self.hnet(ray)      # len(weights) = 10
                 num_target = numel(weights)    # numel(weights) = 31910
                 logits_l, logits_r = self.net(batch['data'], weights)
                 logits_array = [logits_l, logits_r]
 
-                loss_vec = torch.stack([obj(logits, **batch) for (logits,obj) in zip(logits_array, self.obj_arr)])
+                loss_vec = torch.stack([obj(logits, batch) for (logits,obj) in zip(logits_array, self.obj_arr)])
                 if self.is_agg:
                     loss_vec = torch.atleast_2d(loss_vec)
                     ray = torch.atleast_2d(ray)
@@ -70,12 +190,11 @@ class GradBasePSLMTLSolver:
                 elif self.solver_name in ['epo', 'pmgda']:
                     # Here, we also need the Jacobian matrix.
                     grads = []
+                    flat_weights: list[torch.Tensor] = [w for w in weights.values()]
                     for i, loss in enumerate(loss_vec):
-                        g = torch.autograd.grad(loss, weights, retain_graph=True)
-                        flat_grad = self._flattening(g)
-                        grads.append(flat_grad.data)
-                    print()
-
+                        g = torch.autograd.grad(loss, flat_weights, retain_graph=True)
+                        flat_grad = torch.cat(g, dim=0)
+                        grads.append(flat_grad)
                 else:
                     assert False, 'Unknown solver_name'
                 loss_batch.append( loss.cpu().detach().numpy() )
@@ -83,6 +202,7 @@ class GradBasePSLMTLSolver:
                 self.optimizer.step()
             loss_epoch.append( np.mean(np.array(loss_batch)) )
         res = {'train_loss': loss_epoch}
+        print(res)
         return res
 
     def eval(self, n_eval):
@@ -104,8 +224,6 @@ class GradBasePSLMTLSolver:
         res['eval_loss'] = np.array(loss_pref)
         res['prefs'] = uniform_prefs.cpu().detach().numpy()
         return res
-
-
 
 class GradBaseMTLSolver:
     def __init__(self, problem_name, batch_size, step_size, epoch, core_solver, prefs):
@@ -197,4 +315,6 @@ class GradBaseMTLSolver:
         return res
 
 if __name__ == '__main__':
-    print()
+    solver = GradBasePSLMTLMetaLearnerSolver("mnist", 512, 1e-4, 50, "cuda:0", "agg_ls")
+    solver.solve()
+    ev = solver.eval(10)
