@@ -24,6 +24,8 @@ import itertools
 from libmoon.metrics import compute_indicators
 from collections import defaultdict
 
+from libmoon.util.xy_util import random_everything
+
 import datetime
 import json
 
@@ -201,6 +203,9 @@ if __name__ == '__main__':
     with open(os.path.join(folder_name, f'args_{current_time}.json'), "w") as f:
         json.dump(vars(args), f)
 
+    # set deterministic behaviour
+    random_everything(42)
+
     args.is_pref_based = is_pref_based(args.solver)
     if torch.cuda.is_available() and args.use_cuda:
         args.device = torch.device("cuda")  # Use the GPU
@@ -212,6 +217,7 @@ if __name__ == '__main__':
     prefs = uniform_pref(n_partition=10, n_obj=2, clip_eps=0.1)
     args.n_prob = len(prefs)
     problem = MultiMnistProblem(args, prefs)
+
 
     loss_history = problem.optimize()
     loss_history = np.array(loss_history)
@@ -229,7 +235,7 @@ if __name__ == '__main__':
         print( f'{k}: {v}' )
 
     plt.plot(final_solution[:,0], final_solution[:,1], color='k', linewidth=3)
-    plt.legend(fontsize=FONT_SIZE)
+    plt.legend(fontsize=FONT_SIZE, loc="center right")
     # draw pref
     solution_norm = np.linalg.norm(final_solution, axis=1, keepdims=True)
     prefs_norm = prefs / np.linalg.norm(prefs, axis=1, keepdims=True) * solution_norm
