@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 import os
 
 from libmoon.util_global.constant import root_name
-
+import matplotlib.pyplot as plt
 
 class MultiMNISTData(torch.utils.data.Dataset):
     """
@@ -44,6 +44,29 @@ class MultiMNISTData(torch.utils.data.Dataset):
         trainLabel = torch.from_numpy(trainLabel).long()
         testX = torch.from_numpy(testX.reshape(20000, 1, 36, 36)).float()
         testLabel = torch.from_numpy(testLabel).long()
+
+        # image_sample = []
+        # label_sample = []
+        # row = 2 
+        # col = 4
+        # for i in range(0,row*col):
+        #     img=trainX[i][0]
+        #     print(img)
+        #     image_sample.append(img)
+        #     label_sample.append(trainLabel[i])
+        # fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(8, 4))
+        # #for ax, image, label in zip(axes, image_sample, label_sample):
+        # for i in range(0,row):
+        #     for j in range(0,col):
+        #         ax= axes[i][j]
+        #         ax.set_axis_off()
+        #         image=image_sample[i*col+j]
+        #         label=label_sample[i*col+j]
+        #         print(label)
+        #         #ax.imshow(image, cmap=plt.cm.gray_r, interpolation='nearest')
+        #         ax.imshow(image, cmap=plt.cm.gray, interpolation='nearest')
+        #         ax.set_title(str(label.data))
+        # plt.show()
 
         if self.val_size > 0:
             valX = torch.from_numpy(valX.reshape(n_val, 1, 36, 36)).float()

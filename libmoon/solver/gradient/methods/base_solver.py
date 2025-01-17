@@ -66,10 +66,11 @@ class GradBaseSolver:
 
             optimizer.step()
             if 'lbound' in dir(problem):
-                x.data = torch.clamp(x.data, torch.Tensor(problem.lbound) + solution_eps,
+                xs_var.data = torch.clamp(xs_var.data, torch.Tensor(problem.lbound) + solution_eps,
                                      torch.Tensor(problem.ubound) - solution_eps)
+
         res = {}
-        res['x'] = x.detach().numpy()
+        res['x'] = xs_var.detach().numpy()
         res['y'] = y_np
         res['hv_arr'] = hv_arr
         res['y_arr'] = y_arr

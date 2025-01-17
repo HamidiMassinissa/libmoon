@@ -1,5 +1,5 @@
 from ..problem.synthetic import VLMOP1, VLMOP2, ZDT1, ZDT2, ZDT3, ZDT4, ZDT6
-from ..problem.synthetic import MAF1
+from ..problem.synthetic import MAF1, F1
 from ..problem.synthetic.dtlz import DTLZ1, DTLZ2, DTLZ3, DTLZ4
 from ..problem.synthetic.re_problem import RE21, RE22, RE23, RE24, RE25, RE31, RE37, RE41, RE42
 from ..problem.synthetic.ml_problem import LinearRegreesion, MOOGaussian
@@ -28,6 +28,7 @@ def get_problem(problem_name, n_var=10):
         'RE37': RE37(),
         'RE41': RE41(),
         'RE42': RE42(),
+        'F1': F1(n_var=n_var),
         'regression': LinearRegreesion(),
         'moogaussian': MOOGaussian()
     }

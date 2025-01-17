@@ -31,14 +31,15 @@ class MultiMnistProblem:
 
     # How to train at the same time.
     def __init__(self, args, prefs):
-        self.dataset = MultiMNISTData(args.problem, 'train')
         self.args = args
+
+        self.dataset = MultiMNISTData(args.problem, 'train')
         self.loader = torch.utils.data.DataLoader(self.dataset, batch_size=self.args.batch_size, shuffle=True,
                                                   num_workers=0)
-        self.dataset_test = MultiMNISTData('mnist', 'test')
+        self.dataset_test = MultiMNISTData(args.problem, 'test')
         self.loader_test = torch.utils.data.DataLoader(self.dataset_test, batch_size=args.batch_size, shuffle=True,
                                                        num_workers=0)
-        self.dataset_val = MultiMNISTData('mnist', 'val')
+        self.dataset_val = MultiMNISTData(args.problem, 'val')
         self.loader_val = torch.utils.data.DataLoader(self.dataset_val, batch_size=args.batch_size, shuffle=True,
                                                       num_workers=0)
 

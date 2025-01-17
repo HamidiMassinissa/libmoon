@@ -1,3 +1,4 @@
+from torch.nn.modules import loss
 from libmoon.solver.gradient.methods.core.mgda_core import solve_mgda
 import torch
 
