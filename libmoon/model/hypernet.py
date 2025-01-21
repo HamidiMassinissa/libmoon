@@ -5,8 +5,8 @@ import torch.nn.functional as F
 
 class MetaLearner(nn.Module):
     def __init__(self,
-                 input_size=1,
-                 output_size=1,
+                 input_size,
+                 output_size,
                  hidden_dim=50):
         super().__init__()
 
@@ -15,12 +15,14 @@ class MetaLearner(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, output_size)
-        ).to("cuda:0")
+        )
 
-    def forward(self, x):
-        x = self.mlp(x)
-        return x
+    def forward(self, gradients):
+        d = self.mlp(gradients)
+        return d
     
 class MetaHyperNet(nn.Module):
     def __init__(self,
@@ -52,7 +54,14 @@ class MetaHyperNet(nn.Module):
     def shared_parameters(self):
         return list([p for n,p in self.named_parameters() if 'task' not in n])
     
-    def get_parameters_size(self):
+    def get_total_weights(self):
+        weights_size = self.get_weights_size()
+        total_weights = 0
+        for w in weights_size.values():
+            total_weights += w
+        return total_weights
+    
+    def get_weights_size(self):
         parameters = {
             "features0.weights": 2 * self.ray_hidden_dim,
             "features0.bias": self.ray_hidden_dim,
@@ -90,7 +99,7 @@ class MetaHyperNet(nn.Module):
 
         return parameters
 
-    def forward(self, ray, weights=None):
+    def forward(self, ray, weights):
         features = F.linear(
             ray, 
             weight=weights["features0.weights"].reshape(
@@ -131,14 +140,15 @@ class MetaHyperNet(nn.Module):
             features,
             weight=weights[f"conv0_bias.weights"].reshape(
                 self.n_kernels, self.ray_hidden_dim
-            )
+            ),
+            bias=weights[f"conv0_bias.bias"]
         )
         for i in range(1, self.n_conv_layers):
             # previous number of kernels.
             p = 2**(i-1) * self.n_kernels
             # current number of kernels
             c = 2**i * self.n_kernels
-            out_dict[f"conv{i}_weights"] = F.linear(
+            out_dict[f"conv{i}.weights"] = F.linear(
                 features,
                 weight=weights[f"conv{i}_weights.weights"].reshape(
                     c * p * self.kernel_size[i] * self.kernel_size[i],
@@ -146,7 +156,7 @@ class MetaHyperNet(nn.Module):
                 ),
                 bias=weights[f"conv{i}_weights.bias"]
             )
-            out_dict[f"conv{i}_bias"] = F.linear(
+            out_dict[f"conv{i}.bias"] = F.linear(
                 features,
                 weight=weights[f"conv{i}_bias.weights"].reshape(
                     c, self.ray_hidden_dim
@@ -361,4 +371,4 @@ if __name__ == '__main__':
     out_dict = hyper_model(prefs)
 
     hypermeta = MetaHyperNet()
-    print(hypermeta.get_parameters_size())
+    print(hypermeta.get_weights_size())
