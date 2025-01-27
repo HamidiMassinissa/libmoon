@@ -16,6 +16,8 @@ from libmoon.model.hypernet import HyperNet, LeNetTarget, MetaLearner, MetaHyper
 from libmoon.util.prefs import get_random_prefs, get_uniform_pref
 from libmoon.util.network import numel
 from libmoon.util import random_everything
+from torchviz import make_dot
+from time import sleep
 
 def g(ray: torch.Tensor, loss: torch.Tensor):
     g_sum = 0.0
@@ -62,56 +64,61 @@ class GradBasePSLMTLMetaLearnerSolver:
         self.is_agg = self.solver_name.startswith('agg')
         self.agg_name = self.solver_name.split('_')[-1] if self.is_agg else None
 
-        self.mu = 1e-3
+        self.mu = torch.tensor(1e-3, requires_grad=True).to(self.device)
 
 
     def solve(self):
-        cross_loss = nn.CrossEntropyLoss()
         loss_epoch = []
+        torch.autograd.set_detect_anomaly(True)
+        self.metanet.train()
+
         for epoch_idx in tqdm(range(self.epoch)):
             loss_batch = []
+            k = 0
             for batch_idx, batch in enumerate(self.train_loader):
+                print(batch_idx)
                 ray = torch.tensor(
                     np.random.dirichlet((1, 1), 1).astype(np.float32).flatten(),
                     requires_grad=True,
                 ).to(self.device)  # ray.shape (1,2), everytime, only sample one preference.
-                for k, v in batch.items():
-                    batch[k] = v.to(self.device)
+                for batch_idx, v in batch.items():
+                    batch[batch_idx] = v.to(self.device)
                 # batch['data'].shape: (batch_size, 1, 36, 36)
-                self.metanet.train()
-                self.optimizer.zero_grad()
 
                 target_weigths: dict = self.hnet(ray, self.hnet_weights)
                 logits_l, logits_r = self.net(batch['data'], target_weigths)
-                logits_array = [logits_l, logits_r]
+                logits_array = {self.obj_arr[0].logits_name: logits_l, self.obj_arr[1].logits_name: logits_r}
 
-                loss_vec = torch.stack([obj(logits, **batch) for (logits,obj) in zip(logits_array, self.obj_arr)]).requires_grad_()
-                
+                loss_vec = torch.stack([obj(logits_array, batch) for obj in self.obj_arr])
                 grads = torch.zeros(self.hnet.get_total_weights()).to(self.device)
-
-                loss_vec_2d = torch.atleast_2d(loss_vec)
-                ray_2d = torch.atleast_2d(ray)
-                loss = get_agg_func(self.agg_name)(loss_vec_2d, ray_2d)
-                # Here, we also need the Jacobian matrix.
+                    
                 flat_weights: list[torch.Tensor] = [w for w in self.hnet_weights.values()]
                 for l, r in zip(loss_vec, ray):
-                    grad = torch.autograd.grad(l, flat_weights, retain_graph=True)
+                    grad = torch.autograd.grad(r * l, flat_weights, retain_graph=True)
                     flat_grad = (1 / self.batch_size) * torch.cat(grad)
-                    grads += flat_grad
+                    grads = grads + flat_grad
 
-                loss_batch.append( loss.cpu().detach().numpy() )
-                loss.backward(retain_graph=True)
-
-                d = self.metanet(grads)
-
+                d: torch.Tensor = self.metanet(grads)
+                    
                 next_index = 0
                 with torch.no_grad():
                     for n, size in self.hnet_weights_sizes.items():
-                        self.hnet_weights[n] -= self.mu * d[next_index : (next_index+size)]
+                        # print(self.hnet_weights[n].requires_grad, self.mu.requires_grad, d[next_index : (next_index+size)].requires_grad)
+                        self.hnet_weights[n] = self.hnet_weights[n] - self.mu * d[next_index : (next_index+size)]
                         next_index += size
 
-                self.optimizer.zero_grad()
-                self.optimizer.step()
+                if (k == 0):
+                    meta_losses = loss_vec.clone().detach()
+
+                meta_loss: torch.Tensor = max([loss - prev_loss for (loss, prev_loss) in zip(loss_vec, meta_losses)])
+                meta_losses = loss_vec.clone().detach()
+
+                meta_loss.backward()
+                with torch.no_grad():
+                    meta_grads = torch.autograd.grad(meta_loss, [p for p in self.metanet.parameters()], retain_graph=True, allow_unused=True)
+                    print(meta_grads)
+                k+=1
+                
             loss_epoch.append( np.mean(np.array(loss_batch)) )
             print(loss_epoch[-1])
         res = {'train_loss': loss_epoch}
