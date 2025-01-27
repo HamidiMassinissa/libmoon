@@ -22,8 +22,9 @@ class CrossEntropyLoss(torch.nn.CrossEntropyLoss):
         self.label_name = label_name
         self.logits_name = logits_name
 
-    def __call__(self, logits, **kwargs):
-        labels = kwargs[self.label_name]
+    def __call__(self, logits, labels):
+        logits = logits[self.logits_name]
+        labels = labels[self.label_name]
         return super().__call__(logits, labels)
 
 

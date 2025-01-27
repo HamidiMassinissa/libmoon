@@ -67,6 +67,7 @@ class MultiMnistProblem:
 
     def eval(self):
         results = defaultdict(list)
+        labels = dict()
 
         for pref_idx, pref in enumerate(self.prefs):
             self.model_arr[pref_idx].eval()
@@ -78,10 +79,11 @@ class MultiMnistProblem:
                 for batch in self.loader_val:
                     data_ = {k: v.to(self.args.device) for k, v in batch.items()}
                     logits = self.model_arr[pref_idx](data_)
-                    logits['labels_l'] = data_['labels_l']
-                    logits['labels_r'] = data_['labels_r']
-                    l1 = loss_1(**logits)
-                    l2 = loss_2(**logits)
+                    labels['labels_l'] = data_['labels_l']
+                    labels['labels_r'] = data_['labels_r']
+
+                    l1 = loss_1(logits, labels)
+                    l2 = loss_2(logits, labels)
                     loss1 += l1
                     loss2 += l2
                     pred1 = logits['logits_l'].max(1).indices
@@ -100,6 +102,7 @@ class MultiMnistProblem:
 
     def optimize(self):
         loss_all = []
+        labels_dict = dict()
         for _ in tqdm(range(self.args.num_epoch)):
             if self.is_pref_flag:
                 loss_history = [ [] for i in range(self.n_prob) ]
@@ -113,11 +116,11 @@ class MultiMnistProblem:
                     for pref_idx, (pref, model, optimizer) in enumerate(
                             zip(self.prefs, self.model_arr, self.optimizer_arr)):
                         logits_dict = self.model_arr[pref_idx](data_)
-                        logits_dict['labels_l'] = data_['labels_l']
-                        logits_dict['labels_r'] = data_['labels_r']
+                        labels_dict['labels_l'] = data_['labels_l']
+                        labels_dict['labels_r'] = data_['labels_r']
 
-                        l1 = loss_1(**logits_dict)
-                        l2 = loss_2(**logits_dict)
+                        l1 = loss_1(logits_dict, labels_dict)
+                        l2 = loss_2(logits_dict, labels_dict)
 
                         l_contains_grad = [l1, l2]
 
@@ -131,7 +134,7 @@ class MultiMnistProblem:
                             losses = array([l1_np, l2_np])
 
                         if args.solver == 'agg':
-                            if args.agg_mtd == 'ls':
+                            if args.agg_mtd in ['ls', 'mtche']:
                                 alpha = self.core_solver_arr[pref_idx].get_alpha(G = None, losses=None)
                             else:
                                 assert False, 'mtd not implemented'
@@ -153,10 +156,11 @@ class MultiMnistProblem:
 
                     for model_idx, model in enumerate(self.model_arr):
                         logits_dict = self.model_arr[model_idx](data_)
-                        logits_dict['labels_l'] = data_['labels_l']
-                        logits_dict['labels_r'] = data_['labels_r']
-                        l1 = loss_1(**logits_dict)
-                        l2 = loss_2(**logits_dict)
+                        labels_dict['labels_l'] = data_['labels_l']
+                        labels_dict['labels_r'] = data_['labels_r']
+
+                        l1 = loss_1(logits_dict, labels_dict)
+                        l2 = loss_2(logits_dict, labels_dict)
 
                         losses_ts[model_idx] = torch.stack([l1, l2])
                         l1_np, l2_np = np.array(l1.cpu().detach().numpy(), copy=True), np.array(l2.cpu().detach().numpy(), copy=True)
@@ -189,7 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=512, type=int)
     parser.add_argument('--shuffle', default=True, type=bool)
     parser.add_argument('--lr', default=1e-2, type=float)
-    parser.add_argument('--num_epoch', default=1, type=int)
+    parser.add_argument('--num_epoch', default=100, type=int)
     parser.add_argument('--use-cuda', default=True, type=bool)
     parser.add_argument('--agg-mtd', default='ls', type=str)   # This att is only valid when args.solver=agg.
     parser.add_argument('--solver', default='agg', type=str)
@@ -217,7 +221,6 @@ if __name__ == '__main__':
     prefs = uniform_pref(n_partition=10, n_obj=2, clip_eps=0.1)
     args.n_prob = len(prefs)
     problem = MultiMnistProblem(args, prefs)
-
 
     loss_history = problem.optimize()
     loss_history = np.array(loss_history)

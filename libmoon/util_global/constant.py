@@ -53,8 +53,7 @@ hv_ref_dict = {
     'MAF1': array([2.0, 2.0, 2.0]),
     'mnist': array([3.0, 3.0]),
     'fmnist': array([3.0, 3.0]),
-
-
+    'fashion': array([3.0, 3.0]),
 }
 
 def get_hv_ref_dict(problem_name):
