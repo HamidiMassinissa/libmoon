@@ -101,11 +101,10 @@ class GradBasePSLMTLMetaLearnerSolver:
                 d: torch.Tensor = self.metanet(grads)
                     
                 next_index = 0
-                with torch.no_grad():
-                    for n, size in self.hnet_weights_sizes.items():
-                        # print(self.hnet_weights[n].requires_grad, self.mu.requires_grad, d[next_index : (next_index+size)].requires_grad)
-                        self.hnet_weights[n] = self.hnet_weights[n] - self.mu * d[next_index : (next_index+size)]
-                        next_index += size
+                for n, size in self.hnet_weights_sizes.items():
+                    # print(self.hnet_weights[n].requires_grad, self.mu.requires_grad, d[next_index : (next_index+size)].requires_grad)
+                    self.hnet_weights[n] = self.hnet_weights[n] - self.mu * d[next_index : (next_index+size)]
+                    next_index += size
 
                 if (k == 0):
                     meta_losses = loss_vec.clone().detach()
@@ -115,8 +114,7 @@ class GradBasePSLMTLMetaLearnerSolver:
 
                 meta_loss.backward()
                 with torch.no_grad():
-                    meta_grads = torch.autograd.grad(meta_loss, [p for p in self.metanet.parameters()], retain_graph=True, allow_unused=True)
-                    print(meta_grads)
+                    meta_grads = torch.autograd.grad(meta_loss, [p for p in self.metanet.parameters()], allow_unused=True)
                 k+=1
                 
             loss_epoch.append( np.mean(np.array(loss_batch)) )
