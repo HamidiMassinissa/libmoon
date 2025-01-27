@@ -46,7 +46,7 @@ class GradBasePSLMTLMetaLearnerSolver:
         self.net = LeNetTarget(kernel_size=(9, 5)).to(self.device)
         self.metanet = MetaLearner(input_size=self.hnet.get_total_weights(),
                                    output_size=self.hnet.get_total_weights(),
-                                   hidden_dim=150).to(self.device)
+                                   hidden_dim=50).to(self.device)
         # self.metanet = nn.LSTM(input_size=self.hnet.get_total_weights(),
         #                        hidden_size=10)
         self.hnet_weights_sizes = self.hnet.get_weights_size()
@@ -77,6 +77,7 @@ class GradBasePSLMTLMetaLearnerSolver:
             k = 0
             for batch_idx, batch in enumerate(self.train_loader):
                 print(batch_idx)
+                print(torch.cuda.memory_allocated())
                 ray = torch.tensor(
                     np.random.dirichlet((1, 1), 1).astype(np.float32).flatten(),
                     requires_grad=True,
@@ -95,6 +96,7 @@ class GradBasePSLMTLMetaLearnerSolver:
                 flat_weights: list[torch.Tensor] = [w for w in self.hnet_weights.values()]
                 for l, r in zip(loss_vec, ray):
                     grad = torch.autograd.grad(r * l, flat_weights, retain_graph=True)
+
                     flat_grad = (1 / self.batch_size) * torch.cat(grad)
                     grads = grads + flat_grad
 
@@ -102,19 +104,19 @@ class GradBasePSLMTLMetaLearnerSolver:
                     
                 next_index = 0
                 for n, size in self.hnet_weights_sizes.items():
-                    # print(self.hnet_weights[n].requires_grad, self.mu.requires_grad, d[next_index : (next_index+size)].requires_grad)
                     self.hnet_weights[n] = self.hnet_weights[n] - self.mu * d[next_index : (next_index+size)]
                     next_index += size
 
                 if (k == 0):
                     meta_losses = loss_vec.clone().detach()
+                else:
+                    meta_loss: torch.Tensor = max([loss - prev_loss for (loss, prev_loss) in zip(loss_vec, meta_losses)])
 
-                meta_loss: torch.Tensor = max([loss - prev_loss for (loss, prev_loss) in zip(loss_vec, meta_losses)])
-                meta_losses = loss_vec.clone().detach()
+                    meta_losses = loss_vec.clone().detach()
 
-                meta_loss.backward()
-                with torch.no_grad():
-                    meta_grads = torch.autograd.grad(meta_loss, [p for p in self.metanet.parameters()], allow_unused=True)
+                    with torch.no_grad():
+                        meta_grads = torch.autograd.grad(meta_loss, [p for p in self.metanet.parameters()], retain_graph=True)
+                        # TODO mettre à jour les poids du metalearner
                 k+=1
                 
             loss_epoch.append( np.mean(np.array(loss_batch)) )
@@ -325,6 +327,6 @@ class GradBaseMTLSolver:
 
 if __name__ == '__main__':
     # random_everything(42)
-    solver = GradBasePSLMTLMetaLearnerSolver(problem_name="mnist", batch_size=512, step_size=1e-4, epoch=50, device="cuda:0", solver_name="agg_ls")
+    solver = GradBasePSLMTLMetaLearnerSolver(problem_name="fashion", batch_size=128, step_size=1e-4, epoch=50, device="cuda:0", solver_name="agg_ls")
     solver.solve()
     ev = solver.eval(10)
